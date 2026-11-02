@@ -1,0 +1,112 @@
+import SwiftUI
+
+@main
+struct HRMReadApp: App {
+    var body: some Scene { WindowGroup { ContentView() } }
+}
+
+struct ContentView: View {
+    @StateObject private var monitor = BluetoothMonitor()
+    @AppStorage("zoneBoundaries") private var savedZones = ""
+    @State private var showSettings = false
+    private var boundaries: [Int] { savedZones.split(separator: ",").compactMap { Int($0) } }
+    private var zone: Int? { monitor.bpm.flatMap { HeartRateZones.zone(bpm: $0, boundaries: boundaries) } }
+    private let colors: [Color] = [.gray, .blue, .green, .orange, .red]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    Label("HEART RATE", systemImage: "heart.fill")
+                        .font(.headline).foregroundStyle(.secondary)
+                    Text(monitor.bpm.map(String.init) ?? "—")
+                        .font(.system(size: 100, weight: .bold, design: .rounded))
+                        .monospacedDigit().minimumScaleFactor(0.5).lineLimit(1)
+                        .accessibilityLabel(monitor.bpm.map { "\($0) beats per minute" } ?? "No current heart rate")
+                    Text("BPM").font(.title3).foregroundStyle(.secondary)
+                    VStack(spacing: 12) {
+                        Text(zone.map { "ZONE \($0)" } ?? (HeartRateZones.isValid(boundaries) ? "Waiting for heart rate" : "Set your zones"))
+                            .font(.title2.bold())
+                        HStack(spacing: 6) {
+                            ForEach(1...5, id: \.self) { number in
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(colors[number - 1].opacity(zone == number ? 1 : 0.2))
+                                    .frame(height: zone == number ? 24 : 12)
+                            }
+                        }.frame(height: 24)
+                    }.padding().background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
+                    Text(monitor.status).font(.callout).multilineTextAlignment(.center)
+                        .accessibilityAddTraits(.updatesFrequently)
+                    if monitor.connected || monitor.busy || monitor.scanning {
+                        Button("Disconnect / Stop") { monitor.disconnect() }
+                            .buttonStyle(.bordered)
+                    } else {
+                        Button("Find strap") { monitor.scan() }
+                            .buttonStyle(.borderedProminent).controlSize(.large)
+                    }
+                    if !monitor.connected && !monitor.busy {
+                        ForEach(monitor.devices, id: \.identifier) { device in
+                            Button { monitor.connect(device) } label: {
+                                HStack {
+                                    Image(systemName: "sensor.fill")
+                                    VStack(alignment: .leading) {
+                                        Text(device.name ?? "Heart rate strap")
+                                        Text(String(device.identifier.uuidString.suffix(8))).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                }.padding()
+                            }.buttonStyle(.bordered)
+                        }
+                    }
+                    Text("Wear the strap with moist electrodes. Use its open connection mode. Keep this app on screen for live readings.")
+                        .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                }.padding(24)
+            }
+            .navigationTitle("HRM Read")
+            .toolbar { Button { showSettings = true } label: { Image(systemName: "slider.horizontal.3") }.accessibilityLabel("Zone settings") }
+            .sheet(isPresented: $showSettings) { ZoneSettings(savedZones: $savedZones) }
+        }
+    }
+}
+
+struct ZoneSettings: View {
+    @Binding var savedZones: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var entries = ["", "", "", ""]
+    private var values: [Int] { entries.compactMap { Int($0) } }
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    ForEach(0..<4, id: \.self) { index in
+                        HStack {
+                            Text("Zone \(index + 2) starts at")
+                            Spacer()
+                            TextField("BPM", text: $entries[index])
+                                .keyboardType(.numberPad).multilineTextAlignment(.trailing).frame(width: 80)
+                                .accessibilityLabel("Zone \(index + 2) lower boundary in BPM")
+                        }
+                    }
+                } footer: {
+                    Text("Enter your existing Garmin zone boundaries in increasing order (1–300 BPM). Zone 1 includes positive readings below Zone 2. Zone 5 includes all readings at or above its boundary. No age-based zones are assumed.")
+                }
+                if !HeartRateZones.isValid(values) {
+                    Text("Enter four different numbers in increasing order.").foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Heart rate zones")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { savedZones = values.map(String.init).joined(separator: ","); dismiss() }
+                        .disabled(!HeartRateZones.isValid(values))
+                }
+            }
+            .onAppear {
+                let existing = savedZones.split(separator: ",").map(String.init)
+                if existing.count == 4 { entries = existing }
+            }
+        }
+    }
+}
