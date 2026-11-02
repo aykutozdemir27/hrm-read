@@ -1,0 +1,39 @@
+name: Build iPhone app
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install project generator
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Test heart rate parsing and zones
+        shell: bash
+        run: |
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for ds in json.load(sys.stdin)["devices"].values() for d in ds if d["name"].startswith("iPhone")))')
+          xcodebuild test -project HRMRead.xcodeproj -scheme HRMRead -destination "platform=iOS Simulator,id=$DEVICE" CODE_SIGNING_ALLOWED=NO
+      - name: Build unsigned app
+        run: >-
+          xcodebuild -project HRMRead.xcodeproj -scheme HRMRead
+          -configuration Release -sdk iphoneos -destination 'generic/platform=iOS'
+          -derivedDataPath build build CODE_SIGNING_ALLOWED=NO
+          CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+      - name: Package for Sideloadly
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/HRMRead.app Payload/
+          zip -qr HRMRead.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HRMRead-iPhone
+          path: HRMRead.ipa
+          retention-days: 14
