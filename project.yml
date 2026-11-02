@@ -1,0 +1,41 @@
+name: HRMRead
+options:
+  bundleIdPrefix: com.hrmread
+  deploymentTarget:
+    iOS: '16.0'
+targets:
+  HRMRead:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hrmread.personal
+        SWIFT_VERSION: '5.0'
+        TARGETED_DEVICE_FAMILY: '1'
+        CODE_SIGNING_ALLOWED: NO
+    info:
+      path: build/Info.plist
+      properties:
+        CFBundleDisplayName: HRM Read
+        CFBundleShortVersionString: '0.1.0'
+        CFBundleVersion: '1'
+        NSBluetoothAlwaysUsageDescription: Connect to your heart rate strap to display live heart rate.
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+  HRMReadTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests]
+    dependencies:
+      - target: HRMRead
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  HRMRead:
+    build:
+      targets:
+        HRMRead: all
+    test:
+      targets: [HRMReadTests]
