@@ -29,6 +29,22 @@ jobs:
           CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
       - name: Package for Sideloadly
         run: |
+          python3 - <<'PY'
+          import plistlib
+          from pathlib import Path
+          path = Path('build/Build/Products/Release-iphoneos/HRMRead.app/Info.plist')
+          info = plistlib.loads(path.read_bytes())
+          expected = {
+              'CFBundleIdentifier': 'com.hrmread.personal',
+              'CFBundleExecutable': 'HRMRead',
+              'CFBundlePackageType': 'APPL',
+              'CFBundleShortVersionString': '0.1.0',
+          }
+          for key, value in expected.items():
+              assert info.get(key) == value, f'{key}: expected {value!r}, got {info.get(key)!r}'
+          assert info.get('NSBluetoothAlwaysUsageDescription'), 'Missing Bluetooth permission description'
+          print('App metadata validated for installation')
+          PY
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/HRMRead.app Payload/
           zip -qr HRMRead.ipa Payload
