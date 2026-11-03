@@ -15,8 +15,12 @@ targets:
         TARGETED_DEVICE_FAMILY: '1'
         CODE_SIGNING_ALLOWED: NO
     info:
-      path: build/Info.plist
+      path: Config/Info.plist
       properties:
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundlePackageType: APPL
         CFBundleDisplayName: HRM Read
         CFBundleShortVersionString: '0.1.0'
         CFBundleVersion: '1'
