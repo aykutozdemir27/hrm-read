@@ -1,5 +1,24 @@
 # HRM Read — first iPhone build
 
+## Version 0.2.0
+
+- Automatically reconnects to the same selected strap after an unexpected disconnection. Stop cancels retries; quitting the app ends the session. Initial connection/setup failures still report a message. Turning Bluetooth back on resumes a pending session.
+- Settings → Keep screen awake (on by default) prevents automatic screen locking only while the app is visible and scanning, connecting, or connected. Disconnecting or leaving the app restores normal screen locking.
+- Settings → Maximum HR alert lets you enter your own BPM limit and enable sound. No threshold is assumed; alerts are off by default. Two seconds of consecutive fresh readings strictly above the limit start a looping beep pattern that continues until HR drops strictly below the limit. Exactly at the limit, an active alarm continues but a new alarm does not start. Contact loss, stale data, disabling the alert, or leaving the app stop the sound and reset the delay. This is a training cue.
+- Test sound uses the same alert. Audio uses media volume/current output and plays in silent mode, mixing with music. Bluetooth headset routing, volume, and interruptions need real-device testing. Background monitoring is still not implemented.
+- Display and alert options save immediately; Save commits zone boundaries. Existing zone settings retain the same storage key.
+
+### Version 0.2 device checks
+
+1. Install over the existing app using the same Apple Account and bundle ID; confirm your zones remain.
+2. Connect the strap, move it out of range or power-cycle it, then bring it back: BPM clears and reconnects without selecting a different strap. Tap Stop while reconnecting: it must not reconnect until you start again.
+3. Turn phone Bluetooth off/on during a session; verify reconnection. Contact loss without a Bluetooth disconnection should show a contact message, not reconnect endlessly.
+4. Keep screen awake on: wait past the normal auto-lock interval while connected. Turn it off or disconnect: normal auto-lock resumes. Leaving/reopening the app should also restore/reapply the appropriate behavior.
+5. Set a temporary alert limit below your current resting HR to test without exercising harder. Enable the alert: continuous repeated beeps after two seconds. At exactly the threshold, an active alarm should continue; it stops when HR drops strictly below the threshold. Raise the limit above your current HR: sound stops. Turn the alert off: no sound. Restore your preferred limit afterwards.
+6. Test sound with silent mode, headphones, music playing, and different media volumes. Remove the strap: no new HR alerts should occur. Locking the phone or changing apps is outside foreground alert support.
+
+Tests in `Tests/MaxHRAlertTests.swift` cover sustained readings, exact-limit behavior, continued beeping, transient spikes, stale/missing samples, disabled alerts, and invalid limits. Cloud compilation and simulator tests are necessary; Windows cannot run Xcode.
+
 A native iPhone app for live Bluetooth heart rate and five configurable zones. Designed for iPhone SE (2020); minimum iOS 16. No accounts, recording, or uploads inside the app. Uses the Bluetooth Heart Rate Service (180D) and notifications (2A37).
 
 ## Start here on Windows
@@ -40,7 +59,7 @@ Free signing expires after seven days. Enable Sideloadly's automatic refresh; it
 6. Check that the BPM updates. If the signal stops for over six seconds, the number clears rather than displaying an old reading.
 7. Open the sliders button and enter the four lower boundaries for Zones 2–5 from your existing Garmin settings. Zones remain unset until you save valid boundaries.
 
-For the first test, keep the app visible. Background monitoring, automatic reconnection, and workout saving are not implemented. Use **Find strap** again after a disconnection. If you cannot discover the device, verify open mode and temporarily disconnect other apps/devices using the strap.
+Keep the app visible. Background monitoring and workout saving are not implemented. Version 0.2 automatically reconnects to the same strap after a dropped connection until you tap Stop. If you cannot discover the device, verify open mode and temporarily disconnect other apps/devices using the strap.
 
 ## First real-device check
 
