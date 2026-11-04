@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct HRMReadApp: App {
@@ -8,10 +9,23 @@ struct HRMReadApp: App {
 struct ContentView: View {
     @StateObject private var monitor = BluetoothMonitor()
     @AppStorage("zoneBoundaries") private var savedZones = ""
+    @AppStorage("keepScreenAwake") private var keepScreenAwake = true
+    @AppStorage("maxHRAlertEnabled") private var maxHRAlertEnabled = false
+    @AppStorage("maxHRLimit") private var maxHRLimit = ""
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var sound = AlertSound()
+    @State private var alertGate = MaxHRAlertGate()
     @State private var showSettings = false
     private var boundaries: [Int] { savedZones.split(separator: ",").compactMap { Int($0) } }
     private var zone: Int? { monitor.bpm.flatMap { HeartRateZones.zone(bpm: $0, boundaries: boundaries) } }
     private let colors: [Color] = [.gray, .blue, .green, .orange, .red]
+    private var limit: Int { Int(maxHRLimit) ?? 0 }
+    private var aboveLimit: Bool { maxHRAlertEnabled && (1...300).contains(limit) && (monitor.bpm ?? 0) > limit }
+    private var sessionActive: Bool { monitor.connected || monitor.busy || monitor.scanning }
+
+    private func updateScreenAwake() {
+        UIApplication.shared.isIdleTimerDisabled = keepScreenAwake && sessionActive && scenePhase == .active
+    }
 
     var body: some View {
         NavigationStack {
@@ -24,6 +38,13 @@ struct ContentView: View {
                         .monospacedDigit().minimumScaleFactor(0.5).lineLimit(1)
                         .accessibilityLabel(monitor.bpm.map { "\($0) beats per minute" } ?? "No current heart rate")
                     Text("BPM").font(.title3).foregroundStyle(.secondary)
+                    if maxHRAlertEnabled && (1...300).contains(limit) {
+                        Label(alertGate.isActive ? "HR alarm · return below \(limit) BPM" : (aboveLimit ? "Above your \(limit) BPM limit" : "HR alert above \(limit) BPM"),
+                              systemImage: aboveLimit || alertGate.isActive ? "exclamationmark.circle.fill" : "bell")
+                            .foregroundStyle(aboveLimit || alertGate.isActive ? Color.red : Color.secondary)
+                            .font(.headline).multilineTextAlignment(.center)
+                    }
+                    if let error = sound.error { Text(error).font(.footnote).foregroundStyle(.red) }
                     VStack(spacing: 12) {
                         Text(zone.map { "ZONE \($0)" } ?? (HeartRateZones.isValid(boundaries) ? "Waiting for heart rate" : "Set your zones"))
                             .font(.title2.bold())
@@ -64,20 +85,54 @@ struct ContentView: View {
                 }.padding(24)
             }
             .navigationTitle("HRM Read")
-            .toolbar { Button { showSettings = true } label: { Image(systemName: "slider.horizontal.3") }.accessibilityLabel("Zone settings") }
-            .sheet(isPresented: $showSettings) { ZoneSettings(savedZones: $savedZones) }
+            .toolbar { Button { showSettings = true } label: { Image(systemName: "slider.horizontal.3") }.accessibilityLabel("Settings") }
+            .sheet(isPresented: $showSettings) { ZoneSettings(savedZones: $savedZones, sound: sound) }
+        }
+        .onAppear { updateScreenAwake() }
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false; sound.stop(); alertGate.reset() }
+        .onChange(of: sessionActive) { _ in updateScreenAwake() }
+        .onChange(of: keepScreenAwake) { _ in updateScreenAwake() }
+        .onChange(of: scenePhase) { phase in
+            updateScreenAwake()
+            if phase != .active { alertGate.reset(); sound.stop() }
+        }
+        .onChange(of: maxHRLimit) { _ in alertGate.reset(); sound.stop() }
+        .onChange(of: maxHRAlertEnabled) { _ in alertGate.reset(); sound.stop() }
+        .onReceive(monitor.$bpm) { bpm in
+            if alertGate.update(bpm: bpm, limit: limit,
+                                enabled: maxHRAlertEnabled && scenePhase == .active, now: Date()) {
+                sound.play(looping: true)
+            } else { sound.stop() }
         }
     }
 }
 
 struct ZoneSettings: View {
     @Binding var savedZones: String
+    @ObservedObject var sound: AlertSound
+    @AppStorage("keepScreenAwake") private var keepScreenAwake = true
+    @AppStorage("maxHRAlertEnabled") private var maxHRAlertEnabled = false
+    @AppStorage("maxHRLimit") private var maxHRLimit = ""
     @Environment(\.dismiss) private var dismiss
     @State private var entries = ["", "", "", ""]
     private var values: [Int] { entries.compactMap { Int($0) } }
     var body: some View {
         NavigationStack {
             Form {
+                Section("Display") {
+                    Toggle("Keep screen awake", isOn: $keepScreenAwake)
+                    Text("While scanning, connecting, or connected with this app visible. Stops when you disconnect or leave the app.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                Section {
+                    TextField("Maximum HR limit (BPM)", text: $maxHRLimit).keyboardType(.numberPad)
+                    Toggle("Maximum HR sound alert", isOn: $maxHRAlertEnabled)
+                        .disabled(!maxHRAlertEnabled && !(1...300).contains(Int(maxHRLimit) ?? 0))
+                    Button("Test sound") { sound.play() }
+                    if let error = sound.error { Text(error).foregroundStyle(.red) }
+                } header: { Text("Maximum HR alert") } footer: {
+                    Text("Enter your own limit (1–300 BPM). After 2 seconds above it, beeping continues until HR drops strictly below it. At exactly the limit, an active alarm keeps sounding. Signal loss, disabling the alert, or leaving the app stops it. Uses media volume and your current audio output, including in silent mode. Keep the app visible. These options save immediately.")
+                }
                 Section {
                     ForEach(0..<4, id: \.self) { index in
                         HStack {
@@ -94,10 +149,11 @@ struct ZoneSettings: View {
                 if !HeartRateZones.isValid(values) {
                     Text("Enter four different numbers in increasing order.").foregroundStyle(.secondary)
                 }
+                Section { Text("HRM Read 0.2.0").foregroundStyle(.secondary) }
             }
-            .navigationTitle("Heart rate zones")
+            .navigationTitle("Settings")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { savedZones = values.map(String.init).joined(separator: ","); dismiss() }
                         .disabled(!HeartRateZones.isValid(values))

@@ -15,6 +15,8 @@ final class BluetoothMonitor: NSObject, ObservableObject, CBCentralManagerDelega
     private var timer: AnyCancellable?
     private var deadline: DispatchWorkItem?
     private var wantsScan = false
+    private var reconnectWork: DispatchWorkItem?
+    private var shouldReconnect = false
     private let service = CBUUID(string: "180D")
     private let measurement = CBUUID(string: "2A37")
 
@@ -58,6 +60,8 @@ final class BluetoothMonitor: NSObject, ObservableObject, CBCentralManagerDelega
     }
 
     func connect(_ device: CBPeripheral) {
+        shouldReconnect = true
+        reconnectWork?.cancel()
         deadline?.cancel()
         central.stopScan()
         scanning = false
@@ -74,6 +78,8 @@ final class BluetoothMonitor: NSObject, ObservableObject, CBCentralManagerDelega
     }
 
     func disconnect() {
+        shouldReconnect = false
+        reconnectWork?.cancel()
         wantsScan = false
         deadline?.cancel()
         central?.stopScan()
@@ -89,7 +95,8 @@ final class BluetoothMonitor: NSObject, ObservableObject, CBCentralManagerDelega
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         if central.state == .poweredOn {
-            if wantsScan { startScan() }
+            if shouldReconnect, peripheral != nil { reconnect() }
+            else if wantsScan { startScan() }
             return
         }
         deadline?.cancel()
@@ -98,9 +105,9 @@ final class BluetoothMonitor: NSObject, ObservableObject, CBCentralManagerDelega
         connected = false
         busy = false
         scanning = false
-        peripheral = nil
+        reconnectWork?.cancel()
         switch central.state {
-        case .poweredOff: status = "Turn on Bluetooth, then tap Find strap"
+        case .poweredOff: status = shouldReconnect ? "Bluetooth off — reconnects when turned on" : "Turn on Bluetooth, then tap Find strap"
         case .unauthorized: status = "Allow Bluetooth for HRM Read in Settings"
         case .unsupported: status = "Bluetooth Low Energy is unavailable"
         default: status = "Bluetooth is starting…"
@@ -113,24 +120,29 @@ final class BluetoothMonitor: NSObject, ObservableObject, CBCentralManagerDelega
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        guard self.peripheral?.identifier == peripheral.identifier else { return }
+        guard shouldReconnect, self.peripheral?.identifier == peripheral.identifier else {
+            central.cancelPeripheralConnection(peripheral); return
+        }
+        reconnectWork?.cancel()
+        setDeadline(seconds: 20) { [weak self] in
+            self?.fail("Strap setup timed out. Check open mode and try again.")
+        }
         status = "Connected — finding heart rate service…"
         peripheral.discoverServices([service])
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         guard self.peripheral?.identifier == peripheral.identifier else { return }
-        disconnect()
-        status = "Could not connect. Wake the strap and try open mode."
+        reconnect(after: 5)
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         guard self.peripheral?.identifier == peripheral.identifier else { return }
-        disconnect()
-        status = "Strap disconnected — tap Find strap to reconnect"
+        reconnect(after: 2)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard shouldReconnect, self.peripheral?.identifier == peripheral.identifier else { return }
         guard error == nil, let hr = peripheral.services?.first(where: { $0.uuid == service }) else {
             fail("Heart rate service unavailable. Try open mode."); return
         }
@@ -138,6 +150,7 @@ final class BluetoothMonitor: NSObject, ObservableObject, CBCentralManagerDelega
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+        guard shouldReconnect, self.peripheral?.identifier == peripheral.identifier else { return }
         guard error == nil, let value = service.characteristics?.first(where: { $0.uuid == measurement }),
               value.properties.contains(.notify) else {
             fail("This strap did not offer live heart rate notifications."); return
@@ -146,6 +159,7 @@ final class BluetoothMonitor: NSObject, ObservableObject, CBCentralManagerDelega
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
+        guard shouldReconnect, self.peripheral?.identifier == peripheral.identifier else { return }
         guard error == nil, characteristic.isNotifying else { fail("Could not start live readings."); return }
         deadline?.cancel()
         busy = false
@@ -155,6 +169,7 @@ final class BluetoothMonitor: NSObject, ObservableObject, CBCentralManagerDelega
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        guard shouldReconnect, self.peripheral?.identifier == peripheral.identifier else { return }
         guard characteristic.uuid == measurement, error == nil,
               let data = characteristic.value, let reading = HeartRateMeasurement(data: data) else { return }
         lastReading = Date()
@@ -168,4 +183,28 @@ final class BluetoothMonitor: NSObject, ObservableObject, CBCentralManagerDelega
     }
 
     private func fail(_ message: String) { disconnect(); status = message }
+
+    private func reconnect(after delay: Double = 0) {
+        guard shouldReconnect, let device = peripheral else { return }
+        deadline?.cancel()
+        reconnectWork?.cancel()
+        bpm = nil
+        lastReading = nil
+        connected = false
+        guard central.state == .poweredOn else {
+            busy = false
+            status = "Waiting for Bluetooth — reconnects when available"
+            return
+        }
+        busy = true
+        status = "Reconnecting to your strap… Tap Stop to cancel."
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.shouldReconnect, self.central.state == .poweredOn,
+                  self.peripheral?.identifier == device.identifier else { return }
+            // Core Bluetooth keeps this request pending until the strap is available.
+            self.central.connect(device)
+        }
+        reconnectWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
 }
