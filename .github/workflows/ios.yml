@@ -16,7 +16,7 @@ jobs:
         run: brew install xcodegen
       - name: Generate Xcode project
         run: xcodegen generate
-      - name: Test heart rate parsing and zones
+      - name: Test heart rate, alerts, and workout recording
         shell: bash
         run: |
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for ds in json.load(sys.stdin)["devices"].values() for d in ds if d["name"].startswith("iPhone")))')
@@ -38,8 +38,8 @@ jobs:
               'CFBundleIdentifier': 'com.hrmread.personal',
               'CFBundleExecutable': 'HRMRead',
               'CFBundlePackageType': 'APPL',
-              'CFBundleShortVersionString': '0.2.0',
-              'CFBundleVersion': '2',
+              'CFBundleShortVersionString': '0.3.0',
+              'CFBundleVersion': '3',
           }
           for key, value in expected.items():
               assert info.get(key) == value, f'{key}: expected {value!r}, got {info.get(key)!r}'

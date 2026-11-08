@@ -14,6 +14,7 @@ struct ContentView: View {
     @AppStorage("maxHRLimit") private var maxHRLimit = ""
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var sound = AlertSound()
+    @StateObject private var workout = WorkoutRecorder()
     @State private var alertGate = MaxHRAlertGate()
     @State private var showSettings = false
     private var boundaries: [Int] { savedZones.split(separator: ",").compactMap { Int($0) } }
@@ -80,6 +81,8 @@ struct ContentView: View {
                             }.buttonStyle(.bordered)
                         }
                     }
+                    WorkoutPanel(recorder: workout, bpm: monitor.bpm, boundaries: boundaries,
+                                 visible: scenePhase == .active)
                     Text("Wear the strap with moist electrodes. Use its open connection mode. Keep this app on screen for live readings.")
                         .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }.padding(24)
@@ -94,11 +97,12 @@ struct ContentView: View {
         .onChange(of: keepScreenAwake) { _ in updateScreenAwake() }
         .onChange(of: scenePhase) { phase in
             updateScreenAwake()
-            if phase != .active { alertGate.reset(); sound.stop() }
+            if phase != .active { alertGate.reset(); sound.stop(); workout.record(nil) }
         }
         .onChange(of: maxHRLimit) { _ in alertGate.reset(); sound.stop() }
         .onChange(of: maxHRAlertEnabled) { _ in alertGate.reset(); sound.stop() }
         .onReceive(monitor.$bpm) { bpm in
+            workout.record(scenePhase == .active ? bpm : nil)
             if alertGate.update(bpm: bpm, limit: limit,
                                 enabled: maxHRAlertEnabled && scenePhase == .active, now: Date()) {
                 sound.play(looping: true)
@@ -149,7 +153,7 @@ struct ZoneSettings: View {
                 if !HeartRateZones.isValid(values) {
                     Text("Enter four different numbers in increasing order.").foregroundStyle(.secondary)
                 }
-                Section { Text("HRM Read 0.2.0").foregroundStyle(.secondary) }
+                Section { Text("HRM Read 0.3.0").foregroundStyle(.secondary) }
             }
             .navigationTitle("Settings")
             .toolbar {

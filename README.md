@@ -1,4 +1,22 @@
-# HRM Read — first iPhone build
+# HRM Read
+
+## Version 0.3.0
+
+- Start a workout after connecting the strap and receiving HR. Scroll below the connection controls for the workout panel.
+- During recording, see elapsed time, average/peak HR and a live graph covering the last ten minutes. Missing readings break the line.
+- End workout saves a summary with duration, measured HR coverage, average/peak HR and time in each zone. Average HR is weighted by measured time. Each reading is held for at most three seconds; missing time is excluded from statistics and shown separately.
+- Zone boundaries are captured at the start, so changing settings during recording does not reclassify the workout. Without configured zones, HR recording still works but zone times are unavailable.
+- Only the last completed summary is stored locally and available after reopening the app. Starting a new workout leaves that summary available until the new one is completed. No upload or Health access is used. An unfinished recording is lost if the app is terminated.
+- Keep the app visible. Leaving it breaks HR coverage; elapsed session time continues until you end the workout. Disconnecting stops HR coverage but does not end the workout.
+
+### Version 0.3 device checks
+
+1. Confirm Settings shows 0.3.0 and previous zones/alert preferences remain.
+2. Connect the strap and start a workout. Check elapsed time, graph, average and peak update.
+3. Disconnect briefly and reconnect; verify the graph has a gap and missing time appears in the summary.
+4. Leave the app for a minute and return. Elapsed time includes that minute; measured coverage does not.
+5. End and save. Verify five zone durations sum to measured coverage when zones were set at start.
+6. Reopen the app and open Last workout summary. Verify it persists; start another session and verify the next summary replaces it only on completion.
 
 ## Version 0.2.0
 
@@ -19,7 +37,7 @@
 
 Tests in `Tests/MaxHRAlertTests.swift` cover sustained readings, exact-limit behavior, continued beeping, transient spikes, stale/missing samples, disabled alerts, and invalid limits. Cloud compilation and simulator tests are necessary; Windows cannot run Xcode.
 
-A native iPhone app for live Bluetooth heart rate and five configurable zones. Designed for iPhone SE (2020); minimum iOS 16. No accounts, recording, or uploads inside the app. Uses the Bluetooth Heart Rate Service (180D) and notifications (2A37).
+A native iPhone app for live Bluetooth heart rate, five configurable zones, and local workout recording. Designed for iPhone SE (2020); minimum iOS 16. No accounts or uploads inside the app. Uses the Bluetooth Heart Rate Service (180D) and notifications (2A37).
 
 ## Start here on Windows
 
