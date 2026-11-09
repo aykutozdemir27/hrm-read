@@ -153,7 +153,7 @@ struct ZoneSettings: View {
                 if !HeartRateZones.isValid(values) {
                     Text("Enter four different numbers in increasing order.").foregroundStyle(.secondary)
                 }
-                Section { Text("HRM Read 0.3.0").foregroundStyle(.secondary) }
+                Section { Text("HRM Read 0.4.0").foregroundStyle(.secondary) }
             }
             .navigationTitle("Settings")
             .toolbar {

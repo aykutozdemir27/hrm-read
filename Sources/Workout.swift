@@ -8,6 +8,12 @@ struct WorkoutReading: Identifiable, Codable {
     let segment: Int
 }
 
+func workoutHR(at date: Date, readings: [WorkoutReading]) -> Int? {
+    guard let reading = readings.last(where: { $0.date <= date }),
+          date.timeIntervalSince(reading.date) <= 3 else { return nil }
+    return reading.bpm
+}
+
 struct WorkoutSummary: Identifiable, Codable {
     let id: UUID
     let started: Date
@@ -18,6 +24,10 @@ struct WorkoutSummary: Identifiable, Codable {
     let peak: Int?
     let zoneSeconds: [TimeInterval]
     let boundaries: [Int]
+    // Optional so summaries saved by v0.3 remain readable.
+    var readings: [WorkoutReading]?
+    var name: String?
+    var displayName: String { name ?? "Workout \(started.formatted(date: .abbreviated, time: .shortened))" }
 }
 
 /// Integrates each reading for at most three seconds. Gaps and app inactivity
@@ -58,25 +68,52 @@ struct WorkoutSession {
         return WorkoutSummary(id: UUID(), started: started, ended: end,
                               duration: end.timeIntervalSince(started), measuredDuration: measured,
                               average: measured > 0 ? weighted / measured : nil, peak: peak,
-                              zoneSeconds: zones, boundaries: boundaries)
+                              zoneSeconds: zones, boundaries: boundaries,
+                              readings: readings.filter { $0.date <= end })
     }
 }
 
 final class WorkoutRecorder: ObservableObject {
     @Published private(set) var session: WorkoutSession?
-    @Published private(set) var lastSummary: WorkoutSummary?
+    @Published private(set) var workouts: [WorkoutSummary] = []
+    @Published private(set) var error: String?
+    @Published var draftName = ""
+    @Published private(set) var activeName = ""
+    var lastSummary: WorkoutSummary? { workouts.first }
     private let defaults: UserDefaults
+    private let directory: URL
     private let summaryKey = "lastWorkoutSummary.v03"
+    var suggestedName: String { "Workout \(max(1, defaults.integer(forKey: "nextWorkoutNumber")))" }
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, directory: URL? = nil) {
         self.defaults = defaults
-        if let data = defaults.data(forKey: summaryKey) {
-            lastSummary = try? JSONDecoder().decode(WorkoutSummary.self, from: data)
-        }
+        self.directory = directory ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Workouts", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true)
+            let files = try FileManager.default.contentsOfDirectory(at: self.directory, includingPropertiesForKeys: nil)
+            for file in files where file.pathExtension == "json" {
+                do { workouts.append(try JSONDecoder().decode(WorkoutSummary.self, from: Data(contentsOf: file))) }
+                catch { self.error = "A saved workout could not be opened. Its file has been kept." }
+            }
+            if let data = defaults.data(forKey: summaryKey), let old = try? JSONDecoder().decode(WorkoutSummary.self, from: data), !workouts.contains(where: { $0.id == old.id }) {
+                try write(old)
+                workouts.append(old)
+            }
+            workouts.sort { $0.started > $1.started }
+        } catch { self.error = "Workout storage is unavailable. \(error.localizedDescription)" }
+    }
+
+    private func write(_ workout: WorkoutSummary) throws {
+        let data = try JSONEncoder().encode(workout)
+        try data.write(to: directory.appendingPathComponent(workout.id.uuidString + ".json"), options: .atomic)
     }
 
     func start(boundaries: [Int], bpm: Int?, now: Date = Date()) {
         guard session == nil else { return }
+        let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+        activeName = trimmed.isEmpty ? suggestedName : String(trimmed.prefix(80))
+        defaults.set(max(1, defaults.integer(forKey: "nextWorkoutNumber")) + 1, forKey: "nextWorkoutNumber")
+        draftName = ""
         var newSession = WorkoutSession(started: now, boundaries: boundaries)
         newSession.record(bpm, at: now)
         session = newSession
@@ -90,10 +127,24 @@ final class WorkoutRecorder: ObservableObject {
 
     func finish(now: Date = Date()) {
         guard let session else { return }
-        let summary = session.summary(at: now)
-        lastSummary = summary
-        self.session = nil
-        if let data = try? JSONEncoder().encode(summary) { defaults.set(data, forKey: summaryKey) }
+        var summary = session.summary(at: now)
+        summary.name = activeName
+        do {
+            try write(summary)
+            workouts.insert(summary, at: 0)
+            self.session = nil
+            error = nil
+        } catch { self.error = "Could not save workout. Keep the app open and try End workout again." }
+    }
+
+    func rename(id: UUID, name: String) {
+        guard let index = workouts.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var updated = workouts[index]
+        updated.name = String(trimmed.prefix(80))
+        do { try write(updated); workouts[index] = updated; error = nil }
+        catch { self.error = "Could not save the new name. Please try again." }
     }
 }
 

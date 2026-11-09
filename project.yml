@@ -22,8 +22,8 @@ targets:
         CFBundleName: $(PRODUCT_NAME)
         CFBundlePackageType: APPL
         CFBundleDisplayName: HRM Read
-        CFBundleShortVersionString: '0.3.0'
-        CFBundleVersion: '3'
+        CFBundleShortVersionString: '0.4.0'
+        CFBundleVersion: '4'
         NSBluetoothAlwaysUsageDescription: Connect to your heart rate strap to display live heart rate.
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]

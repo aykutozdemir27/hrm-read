@@ -1,5 +1,15 @@
 # HRM Read
 
+## Version 0.4.0
+
+- Live graph shows the last five minutes, with dashed time and BPM guide lines.
+- Completed summaries include the full workout graph. Touch and drag to inspect elapsed time and HR; gaps show No reading.
+- All completed workouts are saved as local files. Saved workouts lists them newest first. Sessions get automatic names, can be named before starting, and can be renamed from their summaries.
+- The previous latest summary is imported without removing its data. Older summaries without readings remain available with a graph-unavailable message.
+- Unfinished sessions are still lost if the app terminates. No cloud upload is used.
+
+Device checks: install over the existing app; verify settings and previous summary remain. Complete two workouts, rename one, reopen the app and verify both survive. Inspect a graph over both a valid sample and a signal gap.
+
 ## Version 0.3.0
 
 - Start a workout after connecting the strap and receiving HR. Scroll below the connection controls for the workout panel.

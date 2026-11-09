@@ -8,11 +8,14 @@ struct WorkoutPanel: View {
     let visible: Bool
     @State private var showSummary = false
     @State private var confirmFinish = false
+    @State private var showHistory = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Label("Workout", systemImage: "figure.run").font(.title2.bold())
+            if let error = recorder.error { Text(error).font(.footnote).foregroundStyle(.red) }
             if let session = recorder.session {
+                Text(recorder.activeName).font(.headline)
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     let summary = session.summary(at: context.date)
                     VStack(alignment: .leading, spacing: 12) {
@@ -32,6 +35,8 @@ struct WorkoutPanel: View {
             } else {
                 Text("Record a session to see your HR trend and time in each zone.")
                     .font(.subheadline).foregroundStyle(.secondary)
+                TextField(recorder.suggestedName, text: $recorder.draftName)
+                    .textFieldStyle(.roundedBorder).accessibilityLabel("Workout name")
                 Button("Start workout") {
                     recorder.start(boundaries: boundaries, bpm: bpm)
                 }.buttonStyle(.borderedProminent).disabled(bpm == nil || !visible)
@@ -39,48 +44,103 @@ struct WorkoutPanel: View {
                 if recorder.lastSummary != nil {
                     Button("Last workout summary") { showSummary = true }
                 }
-                Text("Only the latest completed summary is saved on this phone. An unfinished workout is lost if the app closes.")
+                Text("All completed workouts are saved on this phone. An unfinished workout is lost if the app closes.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Button("Saved workouts (\(recorder.workouts.count))") { showHistory = true }
         }
         .padding().frame(maxWidth: .infinity, alignment: .leading)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
         .confirmationDialog("End this workout and save its summary?", isPresented: $confirmFinish, titleVisibility: .visible) {
-            Button("End and save summary") { recorder.finish(); showSummary = true }
+            Button("End and save summary") { recorder.finish(); showSummary = recorder.session == nil }
             Button("Keep recording", role: .cancel) {}
         }
         .sheet(isPresented: $showSummary) {
-            if let summary = recorder.lastSummary { WorkoutSummaryView(summary: summary) }
+            if let summary = recorder.lastSummary { WorkoutSummaryView(summary: summary, recorder: recorder) }
         }
+        .sheet(isPresented: $showHistory) { WorkoutHistoryView(recorder: recorder) }
     }
 }
 
 struct WorkoutGraph: View {
     let readings: [WorkoutReading]
     let now: Date
+    var fullWorkout = false
+    var started: Date? = nil
+    @State private var selectedMinutes: Double?
+    private var origin: Date { started ?? readings.first?.date ?? start }
+    private var start: Date {
+        let first = started ?? readings.first?.date ?? now
+        return fullWorkout ? first : max(first, now.addingTimeInterval(-300))
+    }
     private var recent: [WorkoutReading] {
-        readings.filter { $0.date >= now.addingTimeInterval(-600) && $0.bpm != nil }
+        readings.filter { $0.date >= start && $0.date <= now && $0.bpm != nil }
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Heart rate · last 10 minutes").font(.caption).foregroundStyle(.secondary)
+            Text(fullWorkout ? "Heart rate · full workout" : "Heart rate · last 5 minutes").font(.caption).foregroundStyle(.secondary)
             if recent.isEmpty {
                 Text("Waiting for readings").frame(maxWidth: .infinity, minHeight: 140).foregroundStyle(.secondary)
             } else {
                 Chart(recent) { reading in
                     if let bpm = reading.bpm {
-                        LineMark(x: .value("Time", reading.date), y: .value("BPM", bpm),
+                        LineMark(x: .value("Elapsed minutes", reading.date.timeIntervalSince(started ?? readings.first?.date ?? start) / 60), y: .value("BPM", bpm),
                                  series: .value("Signal segment", reading.segment))
                             .foregroundStyle(Color.red)
-                        PointMark(x: .value("Time", reading.date), y: .value("BPM", bpm))
+                        PointMark(x: .value("Elapsed minutes", reading.date.timeIntervalSince(started ?? readings.first?.date ?? start) / 60), y: .value("BPM", bpm))
                             .foregroundStyle(Color.red).symbolSize(5)
                     }
+                    if fullWorkout, reading.id == recent.first?.id, let selectedMinutes {
+                        RuleMark(x: .value("Selected time", selectedMinutes))
+                            .foregroundStyle(Color.primary.opacity(0.7))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    }
                 }
-                .chartXScale(domain: max(readings.first?.date ?? now, now.addingTimeInterval(-600))...now.addingTimeInterval(1))
+                .chartXScale(domain: start.timeIntervalSince(started ?? readings.first?.date ?? start) / 60...max(1.0 / 60, now.timeIntervalSince(started ?? readings.first?.date ?? start) / 60))
                 .chartYScale(domain: .automatic(includesZero: false))
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: 4)) {
+                        AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
+                        AxisTick()
+                        AxisValueLabel()
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading, values: .automatic(desiredCount: 5)) {
+                        AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
+                        AxisTick()
+                        AxisValueLabel()
+                    }
+                }
+                .chartXAxisLabel("Elapsed minutes")
+                .chartYAxisLabel("BPM")
                 .chartLegend(.hidden)
+                .chartOverlay { proxy in
+                    if fullWorkout {
+                        GeometryReader { geometry in
+                            Rectangle().fill(.clear).contentShape(Rectangle())
+                                .gesture(DragGesture(minimumDistance: 0)
+                                    .onChanged { value in
+                                        let frame = geometry[proxy.plotAreaFrame]
+                                        let x = min(max(0, value.location.x - frame.minX), frame.width)
+                                        selectedMinutes = proxy.value(atX: x, as: Double.self)
+                                    })
+                        }
+                    }
+                }
                 .frame(height: 150)
-                .accessibilityLabel("Heart rate graph for the last ten minutes. Gaps indicate missing readings.")
+                .accessibilityLabel(fullWorkout ? "Heart rate graph for the full workout. Gaps indicate missing readings." : "Heart rate graph for the last five minutes. Gaps indicate missing readings.")
+                if fullWorkout {
+                    if let selectedMinutes {
+                        let value = workoutHR(at: origin.addingTimeInterval(selectedMinutes * 60), readings: readings)
+                        Text("\(workoutTime(selectedMinutes * 60)) · \(value.map { "\($0) BPM" } ?? "No reading")")
+                            .font(.subheadline.monospacedDigit().bold())
+                            .accessibilityAddTraits(.updatesFrequently)
+                    } else {
+                        Text("Touch and drag on the graph to inspect HR.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
         }
     }
@@ -88,12 +148,19 @@ struct WorkoutGraph: View {
 
 struct WorkoutSummaryView: View {
     let summary: WorkoutSummary
+    @ObservedObject var recorder: WorkoutRecorder
+    @State private var editingName = ""
+    @State private var showRename = false
+    private var current: WorkoutSummary { recorder.workouts.first(where: { $0.id == summary.id }) ?? summary }
     @Environment(\.dismiss) private var dismiss
     private let colors: [Color] = [.gray, .blue, .green, .orange, .red]
     var body: some View {
         NavigationStack {
             List {
                 Section("Session") {
+                    LabeledContent("Name", value: current.displayName)
+                    Button("Rename workout") { editingName = current.displayName; showRename = true }
+                    if let error = recorder.error { Text(error).foregroundStyle(.red) }
                     LabeledContent("Started", value: summary.started.formatted(date: .abbreviated, time: .shortened))
                     LabeledContent("Duration", value: workoutTime(summary.duration))
                     LabeledContent("HR coverage", value: workoutTime(summary.measuredDuration))
@@ -102,6 +169,15 @@ struct WorkoutSummaryView: View {
                 Section("Heart rate") {
                     LabeledContent("Average", value: summary.average.map { "\(Int($0.rounded())) BPM" } ?? "—")
                     LabeledContent("Peak", value: summary.peak.map { "\($0) BPM" } ?? "—")
+                }
+                Section("HR variation") {
+                    if let readings = summary.readings, !readings.isEmpty {
+                        WorkoutGraph(readings: readings, now: summary.ended,
+                                     fullWorkout: true, started: summary.started)
+                    } else {
+                        Text("Graph data is unavailable for this older summary. New workouts will include a full-session graph.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                 }
                 if HeartRateZones.isValid(summary.boundaries) {
                     Section {
@@ -123,11 +199,42 @@ struct WorkoutSummaryView: View {
                     Section { Text("Zone time is unavailable because zones were not configured when this workout started.") }
                 }
                 Section {
-                    Text("Average HR is weighted by measured time. Missing readings and time away from the app are excluded. Only the latest completed summary is saved locally.")
+                    Text("Average HR is weighted by measured time. Missing readings and time away from the app are excluded. All completed workouts are saved locally.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
             .navigationTitle("Workout summary")
+            .toolbar { Button("Done") { dismiss() } }
+            .alert("Rename workout", isPresented: $showRename) {
+                TextField("Workout name", text: $editingName)
+                Button("Save") { recorder.rename(id: summary.id, name: editingName) }
+                    .disabled(editingName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("Enter a name of up to 80 characters.") }
+        }
+    }
+}
+
+struct WorkoutHistoryView: View {
+    @ObservedObject var recorder: WorkoutRecorder
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            List {
+                if recorder.workouts.isEmpty { Text("Your completed workouts will appear here.").foregroundStyle(.secondary) }
+                ForEach(recorder.workouts) { workout in
+                    NavigationLink {
+                        WorkoutSummaryView(summary: workout, recorder: recorder)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(workout.displayName).font(.headline)
+                            Text("\(workout.started.formatted(date: .abbreviated, time: .shortened)) · \(workoutTime(workout.duration))")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Saved workouts")
             .toolbar { Button("Done") { dismiss() } }
         }
     }

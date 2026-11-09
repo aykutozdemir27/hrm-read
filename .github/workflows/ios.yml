@@ -38,8 +38,8 @@ jobs:
               'CFBundleIdentifier': 'com.hrmread.personal',
               'CFBundleExecutable': 'HRMRead',
               'CFBundlePackageType': 'APPL',
-              'CFBundleShortVersionString': '0.3.0',
-              'CFBundleVersion': '3',
+              'CFBundleShortVersionString': '0.4.0',
+              'CFBundleVersion': '4',
           }
           for key, value in expected.items():
               assert info.get(key) == value, f'{key}: expected {value!r}, got {info.get(key)!r}'
